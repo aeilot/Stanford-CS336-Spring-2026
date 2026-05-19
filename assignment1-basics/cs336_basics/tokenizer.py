@@ -59,7 +59,7 @@ PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s
 pattern = re.compile(PAT)
 
 
-def pretokenize_batch(args: tuple[str, tuple[int, int]]) -> list[bytearray]:
+def pretokenize_batch(args: tuple[str, tuple[int, int]]) -> list[bytes]:
     # Debug Info
     # print(os.getpid())
     filename, boundary = args
@@ -70,11 +70,11 @@ def pretokenize_batch(args: tuple[str, tuple[int, int]]) -> list[bytearray]:
         f.seek(start)
         chunk = f.read(end - start).decode("utf-8", errors="ignore")
 
-    return [bytearray(x.encode("utf-8")) for x in pattern.findall(chunk)]
+    return [x.encode("utf-8") for x in pattern.findall(chunk)]
 
 
 # Pretokenization
-def pretokenize(filename: str) -> list[bytearray]:
+def pretokenize(filename: str) -> list[bytes]:
     with open(filename, "rb") as f:
         num_processes = 8
         boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
