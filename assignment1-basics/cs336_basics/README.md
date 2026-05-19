@@ -55,3 +55,10 @@ b'\xC0\xAF'
 ```
 
 This byte sequence is invalid UTF-8 because it is an overlong encoding, which UTF-8 explicitly forbids.
+
+## BPE and Subword Tokenization
+
+A subword tokenizer trades off a larger vocabulary size for better compression of the input byte sequence.
+
+Byte-pair encoding is a compression algorithm that iteratively replaces (“merges”) the most frequent pair of bytes with a single, new unused index. 
+
