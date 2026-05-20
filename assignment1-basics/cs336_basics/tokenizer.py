@@ -51,7 +51,7 @@ def find_chunk_boundaries(
             if found_at != -1:
                 chunk_boundaries[bi] = initial_position + found_at
                 break
-            initial_position += mini_chunk_size - token_len + 1
+            initial_position += mini_chunk_size
 
     # Make sure all boundaries are unique, but might be fewer than desired_num_chunks
     return (sorted(set(chunk_boundaries)), file_size)
@@ -81,27 +81,41 @@ class BPETokenizer:
         filename, boundary = args
         start, end = boundary
 
-        special_strs = [t.decode("utf-8") for t in self.special_tokens]
-        special_pattern = "(" + "|".join(re.escape(t) for t in special_strs) + ")"
-        special_pattern = re.compile(special_pattern)
-
         # Give each process an independent fd, so that the cursor does not mess up with one another
         with open(filename, "rb") as f:
             f.seek(start)
             chunk = f.read(end - start).decode("utf-8", errors="ignore")
 
-        parts = special_pattern.split(chunk)
-        results = []
+        special_strs = [t.decode("utf-8") for t in self.special_tokens]
 
-        for i, part in enumerate(parts):
-            if not part:
-                continue
+        if not special_strs:
+            return [m.encode("utf-8") for m in pattern.findall(chunk)]
 
-            if i % 2 == 1:
-                results.append(part.encode("utf-8"))
-            else:
-                tokens_str = pattern.findall(part)
-                results = results + [x.encode("utf-8") for x in tokens_str]
+        special_strs.sort(key=len, reverse=True)
+
+        special_pattern = "(" + "|".join(re.escape(t) for t in special_strs) + ")"
+        special_pattern = re.compile(special_pattern)
+
+        results: list[bytes] = []
+
+        pos = 0
+
+        for match in special_pattern.finditer(chunk):
+            s, e = match.span()
+
+            t = chunk[pos:s]
+
+            if t:
+                results.extend(token.encode("utf-8") for token in pattern.findall(t))
+
+            results.append(match.group().encode("utf-8"))
+
+            pos = e
+
+        tail = chunk[pos:]
+
+        if tail:
+            results.extend(token.encode("utf-8") for token in pattern.findall(tail))
 
         return results
 
@@ -126,7 +140,7 @@ class BPETokenizer:
 
 if __name__ == "__main__":
     tokenizer = BPETokenizer(
-        "/Users/aeilot/Developer/learning/CS336/assignment1-basics/data/TinyStoriesV2-GPT4-valid.txt",
+        "/Users/aeilot/Developer/learning/CS336/assignment1-basics/data/owt_valid.txt",
         ["<|endoftext|>"],
     )
     tokenizer.pretokenize()
@@ -134,7 +148,7 @@ if __name__ == "__main__":
     test_out_path = "/Users/aeilot/Developer/learning/CS336/assignment1-basics/data/test_pretokenizer.txt"
 
     with open(test_out_path, "w", encoding="utf-8") as f:
-        sample_tokens = tokenizer.pre_vocab[:1000]
+        sample_tokens = tokenizer.pre_vocab
 
         output = b"|".join(sample_tokens)
         f.write(output.decode("utf-8", errors="replace"))
