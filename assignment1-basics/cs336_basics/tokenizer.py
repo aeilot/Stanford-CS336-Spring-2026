@@ -7,16 +7,19 @@ from typing import BinaryIO
 import regex as re
 
 
+# Helper Function
 def find_chunk_boundaries(
     file: BinaryIO,
     desired_num_chunks: int,
     split_special_token: bytes,
-) -> list[int]:
+) -> tuple[list[int], int]:
     """
     Chunk the file into parts that can be counted independently.
     May return fewer chunks if the boundaries end up overlapping.
     """
     assert isinstance(split_special_token, bytes), "Must represent special token as a bytestring"
+
+    token_len = len(split_special_token)
 
     # Get total file size in bytes
     file.seek(0, os.SEEK_END)
@@ -48,10 +51,10 @@ def find_chunk_boundaries(
             if found_at != -1:
                 chunk_boundaries[bi] = initial_position + found_at
                 break
-            initial_position += mini_chunk_size
+            initial_position += mini_chunk_size - token_len + 1
 
     # Make sure all boundaries are unique, but might be fewer than desired_num_chunks
-    return sorted(set(chunk_boundaries))
+    return (sorted(set(chunk_boundaries)), file_size)
 
 
 # Compile the regex for speed
@@ -59,33 +62,81 @@ PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s
 pattern = re.compile(PAT)
 
 
-def pretokenize_batch(args: tuple[str, tuple[int, int]]) -> list[bytes]:
-    # Debug Info
-    # print(os.getpid())
-    filename, boundary = args
-    start, end = boundary
+# Tokenization (BPE)
+class BPETokenizer:
+    # Special tokens contain chunk_boundary
+    def __init__(self, filepath: str, special_tokens: list[str], chunk_boundary: bytes = b"<|endoftext|>"):
+        self.special_tokens = [t.encode("utf-8") for t in special_tokens]
+        self.filepath = filepath
+        self.chunk_boundary = chunk_boundary
+        self.pre_split_pat = re.compile("|".join(re.escape(t) for t in sorted(special_tokens, key=len, reverse=True)))
+        self.vocab: dict[int, bytes] = {}
+        self.merges: list[tuple[bytes, bytes]] = []
+        self.pre_vocab: list[bytes] = []
 
-    # Give each process an independent fd, so that the cursor does not mess up with one another
-    with open(filename, "rb") as f:
-        f.seek(start)
-        chunk = f.read(end - start).decode("utf-8", errors="ignore")
+    # Per Process Pretokenization
+    def _pretokenize_batch(self, args: tuple[str, tuple[int, int]]) -> list[bytes]:
+        # Debug Info
+        # print(os.getpid())
+        filename, boundary = args
+        start, end = boundary
 
-    return [x.encode("utf-8") for x in pattern.findall(chunk)]
+        special_strs = [t.decode("utf-8") for t in self.special_tokens]
+        special_pattern = "(" + "|".join(re.escape(t) for t in special_strs) + ")"
+        special_pattern = re.compile(special_pattern)
+
+        # Give each process an independent fd, so that the cursor does not mess up with one another
+        with open(filename, "rb") as f:
+            f.seek(start)
+            chunk = f.read(end - start).decode("utf-8", errors="ignore")
+
+        parts = special_pattern.split(chunk)
+        results = []
+
+        for i, part in enumerate(parts):
+            if not part:
+                continue
+
+            if i % 2 == 1:
+                results.append(part.encode("utf-8"))
+            else:
+                tokens_str = pattern.findall(part)
+                results = results + [x.encode("utf-8") for x in tokens_str]
+
+        return results
+
+    # Pretokenization
+    def pretokenize(self):
+        with open(self.filepath, "rb") as f:
+            num_processes = 8
+            boundaries, filesize = find_chunk_boundaries(f, num_processes, self.chunk_boundary)
+
+        tasks = [(self.filepath, (s, e)) for s, e in zip(boundaries[:-1], boundaries[1:])]
+
+        # p.map gets list[list[T]]
+        with Pool(num_processes) as p:
+            results = p.map(self._pretokenize_batch, tasks)
+
+        # chain.from_iterable gets iterable of iterables chained, then iterated
+        self.pre_vocab = list(chain.from_iterable(results))
+
+    def train(self, vocab_size: int):
+        pass
 
 
-# Pretokenization
-def pretokenize(filename: str) -> list[bytes]:
-    with open(filename, "rb") as f:
-        num_processes = 8
-        boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
+if __name__ == "__main__":
+    tokenizer = BPETokenizer(
+        "/Users/aeilot/Developer/learning/CS336/assignment1-basics/data/TinyStoriesV2-GPT4-valid.txt",
+        ["<|endoftext|>"],
+    )
+    tokenizer.pretokenize()
 
-    tasks = [(filename, (s, e)) for s, e in zip(boundaries[:-1], boundaries[1:])]
+    test_out_path = "/Users/aeilot/Developer/learning/CS336/assignment1-basics/data/test_pretokenizer.txt"
 
-    # p.map gets list[list[T]]
-    with Pool(num_processes) as p:
-        results = p.map(pretokenize_batch, tasks)
+    with open(test_out_path, "w", encoding="utf-8") as f:
+        sample_tokens = tokenizer.pre_vocab[:1000]
 
-    # chain.from_iterable gets iterable of iterables chained, then iterated
-    flatten = list(chain.from_iterable(results))
+        output = b"|".join(sample_tokens)
+        f.write(output.decode("utf-8", errors="replace"))
 
-    return flatten
+        print(f"Write Success. Total pre-tokens generated: {len(tokenizer.pre_vocab)}")
