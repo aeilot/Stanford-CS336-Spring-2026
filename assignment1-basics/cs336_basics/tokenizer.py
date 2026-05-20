@@ -139,6 +139,7 @@ class BPETokenizer:
 
 
 if __name__ == "__main__":
+    print(os.getpid())
     tokenizer = BPETokenizer(
         "/Users/aeilot/Developer/learning/CS336/assignment1-basics/data/owt_valid.txt",
         ["<|endoftext|>"],
