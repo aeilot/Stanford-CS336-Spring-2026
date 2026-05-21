@@ -62,3 +62,16 @@ A subword tokenizer trades off a larger vocabulary size for better compression o
 
 Byte-pair encoding is a compression algorithm that iteratively replaces (“merges”) the most frequent pair of bytes with a single, new unused index. 
 
+### Training on Tiny Stories
+
+```txt
+Time elapsed: 114.03 seconds
+Current memory usage: 41.52 MB
+Peak memory usage: 51.93 MB
+```
+
+MacBook Air (M4) with 24GB RAM, multiprocessing with process_num = 8.
+
+b' accomplishment' is the longest token.
+
+The counter part is the longest part, according to the profiler.

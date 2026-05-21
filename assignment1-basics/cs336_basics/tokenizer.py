@@ -264,3 +264,39 @@ class BPETokenizer:
 
                 for new_pair in new_seen:
                     self.pair_index.setdefault(new_pair, set()).add(new_word)
+
+
+import time
+import tracemalloc
+
+if __name__ == "__main__":
+    data_path = "/Users/aeilot/Developer/learning/CS336/assignment1-basics/data/TinyStoriesV2-GPT4-train.txt"
+
+    # For profiling, Time and Memory tracing
+    # start_time = time.time()
+    # tracemalloc.start()
+
+    tokenizer = BPETokenizer(data_path, ["<|endoftext|>"], b"<|endoftext|>")
+    tokenizer.pretokenize()
+    tokenizer.train(32000)
+
+    # current, peak = tracemalloc.get_traced_memory()
+    # tracemalloc.stop()
+    # end_time = time.time()
+
+    # print(f"Time elapsed: {end_time - start_time:.2f} seconds")
+    # print(f"Current memory usage: {current / 1024 / 1024:.2f} MB")
+    # print(f"Peak memory usage: {peak / 1024 / 1024:.2f} MB")
+
+    vocab: dict[int, bytes] = {i: token for i, token in enumerate(tokenizer.vocab)}
+
+    output_path = "/Users/aeilot/Developer/learning/CS336/assignment1-basics/data/test_pretokenizer.txt"
+
+    with open(output_path, "w") as f:
+        for k, v in vocab.items():
+            f.write(f"{k}, {v}\n")
+
+    longest_token = max(tokenizer.vocab, key=len)
+
+    print(longest_token)
+    print(len(longest_token))
