@@ -1,8 +1,10 @@
 import os
+import pickle
 import token
 from collections import Counter, defaultdict
 from itertools import chain, islice
 from multiprocessing import Pool
+from pathlib import Path
 from re import L
 from timeit import repeat
 from tokenize import tok_name
@@ -264,6 +266,38 @@ class BPETokenizer:
 
                 for new_pair in new_seen:
                     self.pair_index.setdefault(new_pair, set()).add(new_word)
+                    import pickle
+                    from pathlib import Path
+
+    def save(self, path: str | Path) -> None:
+        state = {
+            "vocab": self.vocab,
+            "merges": self.merges,
+            "special_tokens": self.special_tokens,
+        }
+
+        with open(path, "wb") as f:
+            pickle.dump(state, f)
+
+    @classmethod
+    def load(cls, path: str | Path) -> "BPETokenizer":
+        with open(path, "rb") as f:
+            state = pickle.load(f)
+
+        tokenizer = cls(
+            filepath="",
+            special_tokens=[],
+        )
+
+        tokenizer.vocab = state["vocab"]
+        tokenizer.merges = state["merges"]
+        tokenizer.special_tokens = state["special_tokens"]
+        tokenizer.idx = {token: i for i, token in enumerate(tokenizer.vocab)}
+
+        tokenizer.pretokens = {}
+        tokenizer.pair_index = {}
+
+        return tokenizer
 
 
 import time
@@ -278,7 +312,7 @@ if __name__ == "__main__":
 
     tokenizer = BPETokenizer(data_path, ["<|endoftext|>"], b"<|endoftext|>")
     tokenizer.pretokenize()
-    tokenizer.train(32000)
+    tokenizer.train(10000)
 
     # current, peak = tracemalloc.get_traced_memory()
     # tracemalloc.stop()
@@ -300,3 +334,5 @@ if __name__ == "__main__":
 
     print(longest_token)
     print(len(longest_token))
+
+    tokenizer.save("/Users/aeilot/Developer/learning/CS336/assignment1-basics/data/test_pretokenizer.pkl")

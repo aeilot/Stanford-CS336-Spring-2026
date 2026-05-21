@@ -75,3 +75,11 @@ MacBook Air (M4) with 24GB RAM, multiprocessing with process_num = 8.
 b' accomplishment' is the longest token.
 
 The counter part is the longest part, according to the profiler.
+
+### Training on OpenWebText
+
+Due to limited computational resources, currently `TODO`.
+
+
+## BPE Encoding and Decoding
+
