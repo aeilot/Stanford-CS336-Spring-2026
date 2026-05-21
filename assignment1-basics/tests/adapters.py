@@ -11,7 +11,6 @@ from torch import Tensor
 
 from cs336_basics.tokenizer import BPETokenizer
 
-
 def run_linear(
     d_in: int,
     d_out: int,
@@ -602,7 +601,10 @@ def run_train_bpe(
     tokenizer.pretokenize(num_processes=num_processes)
     tokenizer.train(vocab_size=vocab_size, num_processes=num_processes)
 
-    vocab: dict[int, bytes] = {i: token for i, token in enumerate(tokenizer.vocab)}
+    vocab: dict[int, bytes] = {
+        i: token
+        for i, token in enumerate(tokenizer.vocab)
+    }
 
     merges = tokenizer.merges
 

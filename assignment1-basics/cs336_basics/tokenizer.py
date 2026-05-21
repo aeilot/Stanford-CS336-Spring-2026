@@ -114,16 +114,16 @@ class BPETokenizer:
             t = chunk[pos:s]
 
             if t:
-                # results.extend(token.encode("utf-8") for token in pattern.findall(t))
-                results.extend(token.encode("utf-8") for token in t.split())
+                results.extend(token.encode("utf-8") for token in pattern.findall(t))
+                # results.extend(token.encode("utf-8") for token in t.split())
 
             pos = e
 
         tail = chunk[pos:]
 
         if tail:
-            # results.extend(token.encode("utf-8") for token in pattern.findall(tail))
-            results.extend(token.encode("utf-8") for token in tail.split())
+            results.extend(token.encode("utf-8") for token in pattern.findall(tail))
+            # results.extend(token.encode("utf-8") for token in tail.split())
 
         return Counter(results)
 
@@ -168,15 +168,14 @@ class BPETokenizer:
         # Chunk pretoken counter
         pair_counts: Counter[tuple[int, int]] = self._count_pair()
 
-        if not len(pair_counts):
-            print("Run Pretokenization First\n")
-            return
-
         while len(self.vocab) < vocab_size:
+            if not len(pair_counts):
+                break
+
             # Get most frequent pair
             most_freq, best_freq = max(
                 pair_counts.items(),
-                key=lambda x: (x[1], x[0]),
+                key=lambda x: (x[1], self.vocab[x[0][0]], self.vocab[x[0][1]]),
             )
             new_id = len(self.vocab)
             new_token = self.vocab[most_freq[0]] + self.vocab[most_freq[1]]
