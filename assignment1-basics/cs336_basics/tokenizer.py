@@ -1,7 +1,11 @@
 import os
-from itertools import chain
+import token
+from collections import Counter, defaultdict
+from itertools import chain, islice
 from multiprocessing import Pool
+from re import L
 from timeit import repeat
+from tokenize import tok_name
 from typing import BinaryIO
 
 import regex as re
@@ -58,6 +62,7 @@ def find_chunk_boundaries(
 
 
 # Compile the regex for speed
+# GPT-2 Styles
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 pattern = re.compile(PAT)
 
@@ -70,12 +75,15 @@ class BPETokenizer:
         self.filepath = filepath
         self.chunk_boundary = chunk_boundary
         self.pre_split_pat = re.compile("|".join(re.escape(t) for t in sorted(special_tokens, key=len, reverse=True)))
-        self.vocab: dict[int, bytes] = {}
+        self.vocab: list[bytes] = [bytes([i]) for i in range(256)]
+        self.vocab.extend(self.special_tokens)
+        self.idx: dict[bytes, int] = {v: i for i, v in enumerate(self.vocab)}
         self.merges: list[tuple[bytes, bytes]] = []
-        self.pre_vocab: list[bytes] = []
+        self.pretokens: dict[tuple[int, ...], int] = {}
+        self.pair_index: dict[tuple[int, int], set[tuple[int, ...]]] = defaultdict(set)
 
     # Per Process Pretokenization
-    def _pretokenize_batch(self, args: tuple[str, tuple[int, int]]) -> list[bytes]:
+    def _pretokenize_batch(self, args: tuple[str, tuple[int, int]]) -> Counter[bytes]:
         # Debug Info
         # print(os.getpid())
         filename, boundary = args
@@ -89,7 +97,7 @@ class BPETokenizer:
         special_strs = [t.decode("utf-8") for t in self.special_tokens]
 
         if not special_strs:
-            return [m.encode("utf-8") for m in pattern.findall(chunk)]
+            return Counter([m.encode("utf-8") for m in pattern.findall(chunk)])
 
         special_strs.sort(key=len, reverse=True)
 
@@ -106,52 +114,154 @@ class BPETokenizer:
             t = chunk[pos:s]
 
             if t:
-                results.extend(token.encode("utf-8") for token in pattern.findall(t))
-
-            results.append(match.group().encode("utf-8"))
+                # results.extend(token.encode("utf-8") for token in pattern.findall(t))
+                results.extend(token.encode("utf-8") for token in t.split())
 
             pos = e
 
         tail = chunk[pos:]
 
         if tail:
-            results.extend(token.encode("utf-8") for token in pattern.findall(tail))
+            # results.extend(token.encode("utf-8") for token in pattern.findall(tail))
+            results.extend(token.encode("utf-8") for token in tail.split())
 
-        return results
+        return Counter(results)
 
     # Pretokenization
-    def pretokenize(self):
+    def pretokenize(self, num_processes: int = 8):
         with open(self.filepath, "rb") as f:
-            num_processes = 8
             boundaries, filesize = find_chunk_boundaries(f, num_processes, self.chunk_boundary)
 
         tasks = [(self.filepath, (s, e)) for s, e in zip(boundaries[:-1], boundaries[1:])]
 
+        pre_token_count: Counter[bytes] = Counter()
+
         # p.map gets list[list[T]]
         with Pool(num_processes) as p:
-            results = p.map(self._pretokenize_batch, tasks)
+            counters = p.map(self._pretokenize_batch, tasks)
 
-        # chain.from_iterable gets iterable of iterables chained, then iterated
-        self.pre_vocab = list(chain.from_iterable(results))
+            for c in counters:
+                pre_token_count.update(c)
 
-    def train(self, vocab_size: int):
-        pass
+        # Make Words
+        self.pretokens.clear()
 
+        # Words are tuple[int, ...] representing token sequence; special tokens are not words
+        for token_bytes, freq in pre_token_count.items():
+            token_ids = tuple(token_bytes)
+            self.pretokens[token_ids] = freq
 
-if __name__ == "__main__":
-    print(os.getpid())
-    tokenizer = BPETokenizer(
-        "/Users/aeilot/Developer/learning/CS336/assignment1-basics/data/owt_valid.txt",
-        ["<|endoftext|>"],
-    )
-    tokenizer.pretokenize()
+    # Count Words
+    def _count_pair(self) -> Counter[tuple[int, int]]:
+        counts: Counter[tuple[int, int]] = Counter()
+        self.pair_index.clear()
 
-    test_out_path = "/Users/aeilot/Developer/learning/CS336/assignment1-basics/data/test_pretokenizer.txt"
+        for word, freq in self.pretokens.items():
+            for i in range(len(word) - 1):
+                pair = (word[i], word[i + 1])
+                self.pair_index[pair].add(word)
+                counts[pair] += freq
 
-    with open(test_out_path, "w", encoding="utf-8") as f:
-        sample_tokens = tokenizer.pre_vocab
+        return counts
 
-        output = b"|".join(sample_tokens)
-        f.write(output.decode("utf-8", errors="replace"))
+    def train(self, vocab_size: int, num_processes: int = 8):
+        # Chunk pretoken counter
+        pair_counts: Counter[tuple[int, int]] = self._count_pair()
 
-        print(f"Write Success. Total pre-tokens generated: {len(tokenizer.pre_vocab)}")
+        if not len(pair_counts):
+            print("Run Pretokenization First\n")
+            return
+
+        while len(self.vocab) < vocab_size:
+            # Get most frequent pair
+            most_freq, best_freq = max(
+                pair_counts.items(),
+                key=lambda x: (x[1], x[0]),
+            )
+            new_id = len(self.vocab)
+            new_token = self.vocab[most_freq[0]] + self.vocab[most_freq[1]]
+
+            if best_freq <= 0:
+                break
+
+            self.merges.append((self.vocab[most_freq[0]], self.vocab[most_freq[1]]))
+            self.vocab.append(new_token)
+            self.idx[new_token] = new_id
+
+            affected_words = list(self.pair_index.get(most_freq, ()))
+
+            for word in affected_words:
+                freq = self.pretokens.pop(word, 0)
+
+                if freq == 0:
+                    continue
+
+                # Remove old word stats
+                old_seen: set[tuple[int, int]] = set()
+
+                for j in range(len(word) - 1):
+                    old_pair = (word[j], word[j + 1])
+                    pair_counts[old_pair] -= freq
+                    old_seen.add(old_pair)
+
+                    if pair_counts[old_pair] <= 0:
+                        del pair_counts[old_pair]
+
+                for old_pair in old_seen:
+                    words = self.pair_index.get(old_pair)
+
+                    if words is not None:
+                        words.discard(word)
+
+                        if not words:
+                            del self.pair_index[old_pair]
+
+                # Merge Words
+                new_word_list = []
+                i = 0
+                while i < len(word):
+                    if i < len(word) - 1 and word[i] == most_freq[0] and word[i + 1] == most_freq[1]:
+                        new_word_list.append(new_id)
+                        i += 2
+                    else:
+                        new_word_list.append(word[i])
+                        i += 1
+
+                new_word = tuple(new_word_list)
+
+                # if new_word already exists, remove its old stats first
+                existing_freq = self.pretokens.pop(new_word, 0)
+
+                if existing_freq:
+                    existing_seen: set[tuple[int, int]] = set()
+
+                    for j in range(len(new_word) - 1):
+                        existing_pair = (new_word[j], new_word[j + 1])
+                        pair_counts[existing_pair] -= existing_freq
+                        existing_seen.add(existing_pair)
+
+                        if pair_counts[existing_pair] <= 0:
+                            del pair_counts[existing_pair]
+
+                    for existing_pair in existing_seen:
+                        words = self.pair_index.get(existing_pair)
+
+                        if words is not None:
+                            words.discard(new_word)
+
+                            if not words:
+                                del self.pair_index[existing_pair]
+
+                total_freq = freq + existing_freq
+                self.pretokens[new_word] = total_freq
+
+                # add new word stats
+                new_seen: set[tuple[int, int]] = set()
+
+                for j in range(len(new_word) - 1):
+                    new_pair = (new_word[j], new_word[j + 1])
+                    pair_counts[new_pair] += total_freq
+                    new_seen.add(new_pair)
+
+                for new_pair in new_seen:
+                    self.pair_index.setdefault(new_pair, set()).add(new_word)
