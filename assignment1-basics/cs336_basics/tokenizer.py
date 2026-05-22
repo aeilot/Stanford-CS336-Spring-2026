@@ -70,19 +70,17 @@ pattern = re.compile(PAT)
 
 
 # Tokenization (BPE)
-class BPETokenizer:
+class Tokenizer:
     # Special tokens contain chunk_boundary
-    def __init__(self, filepath: str, special_tokens: list[str], chunk_boundary: bytes = b"<|endoftext|>"):
+    def __init__(self, special_tokens: list[str], chunk_boundary: bytes = b"<|endoftext|>"):
         self.special_tokens = [t.encode("utf-8") for t in special_tokens]
-        self.filepath = filepath
         self.chunk_boundary = chunk_boundary
-        self.pre_split_pat = re.compile("|".join(re.escape(t) for t in sorted(special_tokens, key=len, reverse=True)))
         self.vocab: list[bytes] = [bytes([i]) for i in range(256)]
         self.vocab.extend(self.special_tokens)
         self.idx: dict[bytes, int] = {v: i for i, v in enumerate(self.vocab)}
         self.merges: list[tuple[bytes, bytes]] = []
-        self.pretokens: dict[tuple[int, ...], int] = {}
-        self.pair_index: dict[tuple[int, int], set[tuple[int, ...]]] = defaultdict(set)
+        self._pretokens: dict[tuple[int, ...], int] = {}
+        self._pair_index: dict[tuple[int, int], set[tuple[int, ...]]] = defaultdict(set)
 
     # Per Process Pretokenization
     def _pretokenize_batch(self, args: tuple[str, tuple[int, int]]) -> Counter[bytes]:
@@ -130,11 +128,11 @@ class BPETokenizer:
         return Counter(results)
 
     # Pretokenization
-    def pretokenize(self, num_processes: int = 8):
-        with open(self.filepath, "rb") as f:
+    def _pretokenize(self, filepath:str, num_processes: int = 8):
+        with open(filepath, "rb") as f:
             boundaries, filesize = find_chunk_boundaries(f, num_processes, self.chunk_boundary)
 
-        tasks = [(self.filepath, (s, e)) for s, e in zip(boundaries[:-1], boundaries[1:])]
+        tasks = [(filepath, (s, e)) for s, e in zip(boundaries[:-1], boundaries[1:])]
 
         pre_token_count: Counter[bytes] = Counter()
 
@@ -146,27 +144,30 @@ class BPETokenizer:
                 pre_token_count.update(c)
 
         # Make Words
-        self.pretokens.clear()
+        self._pretokens.clear()
 
         # Words are tuple[int, ...] representing token sequence; special tokens are not words
         for token_bytes, freq in pre_token_count.items():
             token_ids = tuple(token_bytes)
-            self.pretokens[token_ids] = freq
+            self._pretokens[token_ids] = freq
 
     # Count Words
     def _count_pair(self) -> Counter[tuple[int, int]]:
         counts: Counter[tuple[int, int]] = Counter()
-        self.pair_index.clear()
+        self._pair_index.clear()
 
-        for word, freq in self.pretokens.items():
+        for word, freq in self._pretokens.items():
             for i in range(len(word) - 1):
                 pair = (word[i], word[i + 1])
-                self.pair_index[pair].add(word)
+                self._pair_index[pair].add(word)
                 counts[pair] += freq
 
         return counts
 
-    def train(self, vocab_size: int, num_processes: int = 8):
+    def train(self, filepath: str, vocab_size: int, num_processes: int = 8):
+        # Pretokenize
+        self._pretokenize(filepath , num_processes)
+
         # Chunk pretoken counter
         pair_counts: Counter[tuple[int, int]] = self._count_pair()
 
@@ -189,10 +190,10 @@ class BPETokenizer:
             self.vocab.append(new_token)
             self.idx[new_token] = new_id
 
-            affected_words = list(self.pair_index.get(most_freq, ()))
+            affected_words = list(self._pair_index.get(most_freq, ()))
 
             for word in affected_words:
-                freq = self.pretokens.pop(word, 0)
+                freq = self._pretokens.pop(word, 0)
 
                 if freq == 0:
                     continue
@@ -209,13 +210,13 @@ class BPETokenizer:
                         del pair_counts[old_pair]
 
                 for old_pair in old_seen:
-                    words = self.pair_index.get(old_pair)
+                    words = self._pair_index.get(old_pair)
 
                     if words is not None:
                         words.discard(word)
 
                         if not words:
-                            del self.pair_index[old_pair]
+                            del self._pair_index[old_pair]
 
                 # Merge Words
                 new_word_list = []
@@ -231,7 +232,7 @@ class BPETokenizer:
                 new_word = tuple(new_word_list)
 
                 # if new_word already exists, remove its old stats first
-                existing_freq = self.pretokens.pop(new_word, 0)
+                existing_freq = self._pretokens.pop(new_word, 0)
 
                 if existing_freq:
                     existing_seen: set[tuple[int, int]] = set()
@@ -245,16 +246,16 @@ class BPETokenizer:
                             del pair_counts[existing_pair]
 
                     for existing_pair in existing_seen:
-                        words = self.pair_index.get(existing_pair)
+                        words = self._pair_index.get(existing_pair)
 
                         if words is not None:
                             words.discard(new_word)
 
                             if not words:
-                                del self.pair_index[existing_pair]
+                                del self._pair_index[existing_pair]
 
                 total_freq = freq + existing_freq
-                self.pretokens[new_word] = total_freq
+                self._pretokens[new_word] = total_freq
 
                 # add new word stats
                 new_seen: set[tuple[int, int]] = set()
@@ -265,7 +266,7 @@ class BPETokenizer:
                     new_seen.add(new_pair)
 
                 for new_pair in new_seen:
-                    self.pair_index.setdefault(new_pair, set()).add(new_word)
+                    self._pair_index.setdefault(new_pair, set()).add(new_word)
                     import pickle
                     from pathlib import Path
 
@@ -280,7 +281,7 @@ class BPETokenizer:
             pickle.dump(state, f)
 
     @classmethod
-    def load(cls, path: str | Path) -> "BPETokenizer":
+    def load(cls, path: str | Path) -> "Tokenizer":
         with open(path, "rb") as f:
             state = pickle.load(f)
 
@@ -294,8 +295,8 @@ class BPETokenizer:
         tokenizer.special_tokens = state["special_tokens"]
         tokenizer.idx = {token: i for i, token in enumerate(tokenizer.vocab)}
 
-        tokenizer.pretokens = {}
-        tokenizer.pair_index = {}
+        tokenizer._pretokens = {}
+        tokenizer._pair_index = {}
 
         return tokenizer
 
@@ -310,9 +311,8 @@ if __name__ == "__main__":
     # start_time = time.time()
     # tracemalloc.start()
 
-    tokenizer = BPETokenizer(data_path, ["<|endoftext|>"], b"<|endoftext|>")
-    tokenizer.pretokenize()
-    tokenizer.train(10000)
+    tokenizer = Tokenizer(["<|endoftext|>"], b"<|endoftext|>")
+    tokenizer.train(data_path, 10000)
 
     # current, peak = tracemalloc.get_traced_memory()
     # tracemalloc.stop()
