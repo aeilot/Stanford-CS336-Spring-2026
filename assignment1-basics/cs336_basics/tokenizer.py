@@ -78,6 +78,7 @@ class Tokenizer:
         self.vocab.extend(self.special_tokens)
         self.idx: dict[bytes, int] = {v: i for i, v in enumerate(self.vocab)}
         self.merges: list[tuple[bytes, bytes]] = []
+        # Merge Ranks needed for encoding. Need to know which merge to apply first when multiple merges are possible. (Chronological order of merges)
         self.merge_ranks: dict[tuple[bytes, bytes], int] = {}
         self._pretokens: dict[tuple[int, ...], int] = {}
         self._pair_index: dict[tuple[int, int], set[tuple[int, ...]]] = defaultdict(set)
@@ -270,6 +271,7 @@ class Tokenizer:
                     import pickle
                     from pathlib import Path
 
+        # Update Merge Ranks
         self.merge_ranks = {merge: i for i, merge in enumerate(self.merges)}
 
     @classmethod
@@ -313,6 +315,7 @@ class Tokenizer:
         # Special Tokens
         special_strs = [t.decode("utf-8") for t in self.special_tokens]
 
+        # Parse text into raw chunks, separating special tokens and regular text
         if not special_strs:
             raw_chunks = [token.encode("utf-8") for token in pattern.findall(text)]
         else:
@@ -334,6 +337,7 @@ class Tokenizer:
 
         final_ids = []
         for chunk in raw_chunks:
+            # If it's a special token, directly map to its ID
             if chunk in self.special_tokens:
                 final_ids.append(self.idx[chunk])
                 continue
