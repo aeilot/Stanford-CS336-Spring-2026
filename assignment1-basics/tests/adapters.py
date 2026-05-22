@@ -11,6 +11,7 @@ from torch import Tensor
 
 from cs336_basics.tokenizer import Tokenizer
 
+
 def run_linear(
     d_in: int,
     d_out: int,
@@ -560,7 +561,9 @@ def get_tokenizer(
     Returns:
         A BPE tokenizer that uses the provided vocab, merges, and special tokens.
     """
-    raise NotImplementedError
+    list_vocab = [vocab[i] for i in range(len(vocab))]
+    sp_tokens: list[bytes] = [t.encode("utf-8") for t in special_tokens] if special_tokens is not None else []
+    return Tokenizer.load(vocab=list_vocab, merges=merges, special_tokens=sp_tokens)
 
 
 def run_train_bpe(
@@ -599,10 +602,7 @@ def run_train_bpe(
 
     tokenizer.train(filepath=str(input_path), vocab_size=vocab_size, num_processes=num_processes)
 
-    vocab: dict[int, bytes] = {
-        i: token
-        for i, token in enumerate(tokenizer.vocab)
-    }
+    vocab: dict[int, bytes] = {i: token for i, token in enumerate(tokenizer.vocab)}
 
     merges = tokenizer.merges
 

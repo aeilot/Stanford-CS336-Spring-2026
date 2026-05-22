@@ -5,10 +5,9 @@ from collections import Counter, defaultdict
 from itertools import chain, islice
 from multiprocessing import Pool
 from pathlib import Path
-from re import L
 from timeit import repeat
 from tokenize import tok_name
-from typing import BinaryIO
+from typing import BinaryIO, Iterable, Iterator
 
 import regex as re
 
@@ -79,6 +78,7 @@ class Tokenizer:
         self.vocab.extend(self.special_tokens)
         self.idx: dict[bytes, int] = {v: i for i, v in enumerate(self.vocab)}
         self.merges: list[tuple[bytes, bytes]] = []
+        self.merge_to_token: dict[tuple[bytes, bytes], bytes] = {}
         self._pretokens: dict[tuple[int, ...], int] = {}
         self._pair_index: dict[tuple[int, int], set[tuple[int, ...]]] = defaultdict(set)
 
@@ -128,7 +128,7 @@ class Tokenizer:
         return Counter(results)
 
     # Pretokenization
-    def _pretokenize(self, filepath:str, num_processes: int = 8):
+    def _pretokenize(self, filepath: str, num_processes: int = 8):
         with open(filepath, "rb") as f:
             boundaries, filesize = find_chunk_boundaries(f, num_processes, self.chunk_boundary)
 
@@ -166,7 +166,7 @@ class Tokenizer:
 
     def train(self, filepath: str, vocab_size: int, num_processes: int = 8):
         # Pretokenize
-        self._pretokenize(filepath , num_processes)
+        self._pretokenize(filepath, num_processes)
 
         # Chunk pretoken counter
         pair_counts: Counter[tuple[int, int]] = self._count_pair()
@@ -269,35 +269,95 @@ class Tokenizer:
                     self._pair_index.setdefault(new_pair, set()).add(new_word)
                     import pickle
                     from pathlib import Path
-
-    def save(self, path: str | Path) -> None:
-        state = {
-            "vocab": self.vocab,
-            "merges": self.merges,
-            "special_tokens": self.special_tokens,
-        }
-
-        with open(path, "wb") as f:
-            pickle.dump(state, f)
+        self.merge_to_token = {merge: self.vocab[256 + j] for j, merge in enumerate(self.merges)}
 
     @classmethod
-    def load(cls, path: str | Path) -> "Tokenizer":
-        with open(path, "rb") as f:
-            state = pickle.load(f)
-
+    def load(cls, vocab: list[bytes], merges: list[tuple[bytes, bytes]], special_tokens: list[bytes]) -> "Tokenizer":
         tokenizer = cls(
-            special_tokens=[],
+            special_tokens=[t.decode("utf-8") for t in special_tokens],
         )
 
-        tokenizer.vocab = state["vocab"]
-        tokenizer.merges = state["merges"]
-        tokenizer.special_tokens = state["special_tokens"]
+        tokenizer.vocab = vocab
+        tokenizer.merges = merges
+        tokenizer.special_tokens = special_tokens
         tokenizer.idx = {token: i for i, token in enumerate(tokenizer.vocab)}
-
-        tokenizer._pretokens = {}
-        tokenizer._pair_index = {}
+        tokenizer.merge_to_token = {merge: tokenizer.vocab[256 + j] for j, merge in enumerate(tokenizer.merges)}
 
         return tokenizer
+
+    @classmethod
+    def from_files(cls, vocab_filepath, merges_filepath, special_tokens=None) -> "Tokenizer":
+        with open(vocab_filepath, "rb") as f:
+            vocab = pickle.load(f)
+
+        with open(merges_filepath, "rb") as f:
+            merges = pickle.load(f)
+
+        if special_tokens is None:
+            special_tokens = []
+
+        return cls.load(vocab, merges, [t.encode("utf-8") for t in special_tokens])
+
+    def to_files(self, vocab_filepath, merges_filepath):
+        with open(vocab_filepath, "wb") as f:
+            pickle.dump(self.vocab, f)
+
+        with open(merges_filepath, "wb") as f:
+            pickle.dump(self.merges, f)
+
+    def decode(self, ids: list[int]) -> str:
+        tokens = [self.vocab[i] for i in ids]
+        return b"".join(tokens).decode("utf-8", errors="ignore")
+
+    def encode(self, text: str) -> list[int]:
+        # Special Tokens
+        special_strs = [t.decode("utf-8") for t in self.special_tokens]
+
+        if not special_strs:
+            return [self.idx[token.encode("utf-8")] for token in pattern.findall(text)]
+
+        special_strs.sort(key=len, reverse=True)
+
+        special_pattern = "(" + "|".join(re.escape(t) for t in special_strs) + ")"
+        special_pattern = re.compile(special_pattern)
+
+        tokens: list[bytes] = []
+
+        pos = 0
+
+        for match in special_pattern.finditer(text):
+            s, e = match.span()
+
+            t = text[pos:s]
+
+            if t:
+                tokens.extend(token.encode("utf-8") for token in pattern.findall(t))
+
+            tokens.append(match.group().encode("utf-8"))
+
+            pos = e
+
+        tail = text[pos:]
+
+        if tail:
+            tokens.extend(token.encode("utf-8") for token in pattern.findall(tail))
+
+        # Merge
+        i = 0
+        while i < len(tokens) - 1:
+            pair = (tokens[i], tokens[i + 1])
+
+            if pair in self.merge_to_token:
+                tokens[i] = self.merge_to_token[pair]
+                del tokens[i + 1]
+            else:
+                i += 1
+
+        return [self.idx[token] for token in tokens]
+
+    def encode_iterable(self, iterable: Iterable[str]) -> Iterator[int]:
+        for text in iterable:
+            yield from self.encode(text)
 
 
 import time
@@ -334,4 +394,5 @@ if __name__ == "__main__":
     print(longest_token)
     print(len(longest_token))
 
-    tokenizer.save("/Users/aeilot/Developer/learning/CS336/assignment1-basics/data/test_pretokenizer.pkl")
+    # Save To File
+    tokenizer.to_files("vocab.pkl", "merges.pkl")
