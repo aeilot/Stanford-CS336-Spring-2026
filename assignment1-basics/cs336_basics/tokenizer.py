@@ -286,7 +286,6 @@ class Tokenizer:
             state = pickle.load(f)
 
         tokenizer = cls(
-            filepath="",
             special_tokens=[],
         )
 
