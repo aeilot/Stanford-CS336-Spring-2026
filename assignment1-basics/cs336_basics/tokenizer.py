@@ -268,8 +268,6 @@ class Tokenizer:
 
                 for new_pair in new_seen:
                     self._pair_index.setdefault(new_pair, set()).add(new_word)
-                    import pickle
-                    from pathlib import Path
 
         # Update Merge Ranks
         self.merge_ranks = {merge: i for i, merge in enumerate(self.merges)}
