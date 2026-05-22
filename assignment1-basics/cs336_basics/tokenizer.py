@@ -78,7 +78,7 @@ class Tokenizer:
         self.vocab.extend(self.special_tokens)
         self.idx: dict[bytes, int] = {v: i for i, v in enumerate(self.vocab)}
         self.merges: list[tuple[bytes, bytes]] = []
-        self.merge_to_token: dict[tuple[bytes, bytes], bytes] = {}
+        self.merge_ranks: dict[tuple[bytes, bytes], int] = {}
         self._pretokens: dict[tuple[int, ...], int] = {}
         self._pair_index: dict[tuple[int, int], set[tuple[int, ...]]] = defaultdict(set)
 
@@ -269,7 +269,8 @@ class Tokenizer:
                     self._pair_index.setdefault(new_pair, set()).add(new_word)
                     import pickle
                     from pathlib import Path
-        self.merge_to_token = {merge: self.vocab[256 + j] for j, merge in enumerate(self.merges)}
+
+        self.merge_ranks = {merge: i for i, merge in enumerate(self.merges)}
 
     @classmethod
     def load(cls, vocab: list[bytes], merges: list[tuple[bytes, bytes]], special_tokens: list[bytes]) -> "Tokenizer":
@@ -281,8 +282,7 @@ class Tokenizer:
         tokenizer.merges = merges
         tokenizer.special_tokens = special_tokens
         tokenizer.idx = {token: i for i, token in enumerate(tokenizer.vocab)}
-        tokenizer.merge_to_token = {merge: tokenizer.vocab[256 + j] for j, merge in enumerate(tokenizer.merges)}
-
+        tokenizer.merge_ranks = {merge: i for i, merge in enumerate(tokenizer.merges)}
         return tokenizer
 
     @classmethod
@@ -314,46 +314,67 @@ class Tokenizer:
         special_strs = [t.decode("utf-8") for t in self.special_tokens]
 
         if not special_strs:
-            return [self.idx[token.encode("utf-8")] for token in pattern.findall(text)]
+            raw_chunks = [token.encode("utf-8") for token in pattern.findall(text)]
+        else:
+            special_strs.sort(key=len, reverse=True)
+            special_pattern = re.compile("(" + "|".join(re.escape(t) for t in special_strs) + ")")
 
-        special_strs.sort(key=len, reverse=True)
+            raw_chunks = []
+            pos = 0
+            for match in special_pattern.finditer(text):
+                s, e = match.span()
+                t = text[pos:s]
+                if t:
+                    raw_chunks.extend(token.encode("utf-8") for token in pattern.findall(t))
+                raw_chunks.append(match.group().encode("utf-8"))
+                pos = e
+            tail = text[pos:]
+            if tail:
+                raw_chunks.extend(token.encode("utf-8") for token in pattern.findall(tail))
 
-        special_pattern = "(" + "|".join(re.escape(t) for t in special_strs) + ")"
-        special_pattern = re.compile(special_pattern)
+        final_ids = []
+        for chunk in raw_chunks:
+            if chunk in self.special_tokens:
+                final_ids.append(self.idx[chunk])
+                continue
 
-        tokens: list[bytes] = []
+            # For regular text chunks, break down into initial base bytes
+            ids = [self.idx[bytes([b])] for b in chunk]
 
-        pos = 0
+            while len(ids) >= 2:
+                # Find the pair with the lowest merge rank (highest priority)
+                best_pair = None
+                best_rank = float("inf")
 
-        for match in special_pattern.finditer(text):
-            s, e = match.span()
+                for i in range(len(ids) - 1):
+                    pair = (self.vocab[ids[i]], self.vocab[ids[i + 1]])
+                    rank = self.merge_ranks.get(pair, float("inf"))
+                    if rank < best_rank:
+                        best_rank = rank
+                        best_pair = (i, pair)
 
-            t = text[pos:s]
+                if best_pair is None:
+                    break  # No more mergeable pairs exist
 
-            if t:
-                tokens.extend(token.encode("utf-8") for token in pattern.findall(t))
+                # Merge the highest priority pair found
+                idx_to_merge, pair_bytes = best_pair
+                merged_token_bytes = pair_bytes[0] + pair_bytes[1]
+                merged_id = self.idx[merged_token_bytes]
 
-            tokens.append(match.group().encode("utf-8"))
+                new_ids = []
+                i = 0
+                while i < len(ids):
+                    if i == idx_to_merge:
+                        new_ids.append(merged_id)
+                        i += 2
+                    else:
+                        new_ids.append(ids[i])
+                        i += 1
+                ids = new_ids
 
-            pos = e
+            final_ids.extend(ids)
 
-        tail = text[pos:]
-
-        if tail:
-            tokens.extend(token.encode("utf-8") for token in pattern.findall(tail))
-
-        # Merge
-        i = 0
-        while i < len(tokens) - 1:
-            pair = (tokens[i], tokens[i + 1])
-
-            if pair in self.merge_to_token:
-                tokens[i] = self.merge_to_token[pair]
-                del tokens[i + 1]
-            else:
-                i += 1
-
-        return [self.idx[token] for token in tokens]
+        return final_ids
 
     def encode_iterable(self, iterable: Iterable[str]) -> Iterator[int]:
         for text in iterable:
