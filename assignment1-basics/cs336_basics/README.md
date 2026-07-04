@@ -81,5 +81,12 @@ The counter part is the longest part, according to the profiler.
 Due to limited computational resources, currently `TODO`.
 
 
-## BPE Encoding and Decoding
+## Transformer Language Model Architecture
 
+A language model takes as input a batched sequence of integer token IDs (i.e., torch.Tensor of shape (batch_size, sequence_length)), and returns a (batched) normalized probability distribution over the vocabulary (i.e., a PyTorch Tensor of shape (batch_size, sequence_length, vocab_size)), where the predicted distribution is over the next word for each input token.
+
+**Token Embeddings** Each embedding layer takes in a tensor of integers of shape (batch_size, sequence_length) and produces a sequence of vectors of shape (batch_size, sequence_length, d_model).
+
+The two key ops are `einsum`, which can do tensor contractions with arbitrary dimensions of input tensors, and `rearrange`, which can reorder, concatenate, and split arbitrary dimensions.
+
+Many machine learning papers use row vectors in their notation, which result in representations that mesh well with the row-major memory ordering.
