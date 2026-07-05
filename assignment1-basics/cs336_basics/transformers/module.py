@@ -117,3 +117,7 @@ class SwiGLU(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
+
+class FFN(SwiGLU):
+    pass
+
