@@ -98,3 +98,27 @@ $$FFN(x)=W_2\left(\mathrm{SiLU}(W_1x)\odot(W_3x)\right)$$, where $W_1,W_3\in\mat
 Canonically, $d_{ff}=\frac{8}{3}d_{model}$; in practice, $d_{ff}$ is often rounded to a nearby multiple of 64 for hardware efficiency. This is basically `up projection` + `gate projection` then `down projection`.
 
 SwiGLU combines the SiLU (Swish) activation with GLU gating, and empirical results show it outperforms standard ReLU and plain SiLU in language modeling tasks.
+
+**RoPE** To inject positional information, RoPE rotates every pair of embedding dimensions instead of adding positional embeddings. For a query token $q^{(i)} = W_q x^{(i)} \in \mathbb{R}^d$ at position $i$, the rotated query is computed as $q'^{(i)} = R^i q^{(i)} = R^i W_q x^{(i)}$, where each pair $(q_{2k-1}, q_{2k})$ is treated as a 2D vector and rotated by the angle $\theta_{i,k} = \frac{i}{\Theta^{(2k-2)/d}}$. The corresponding rotation block is
+
+$$
+R_k^i =
+\begin{pmatrix}
+\cos(\theta_{i,k}) & -\sin(\theta_{i,k}) \\
+\sin(\theta_{i,k}) & \cos(\theta_{i,k})
+\end{pmatrix},
+$$
+
+and the full rotation matrix is a block-diagonal matrix
+
+$$
+R^i =
+\begin{pmatrix}
+R_1^i & 0 & \cdots & 0 \\
+0 & R_2^i & \cdots & 0 \\
+\vdots & \vdots & \ddots & \vdots \\
+0 & 0 & \cdots & R_{d/2}^i
+\end{pmatrix},
+$$
+
+where each $0$ denotes a $2 \times 2$ zero matrix. In practice, the full $d \times d$ matrix is never constructed; instead, the precomputed values of $\cos(\theta_{i,k})$ and $\sin(\theta_{i,k})$ are cached (e.g., using `self.register_buffer(persistent=False)`) and reused across layers and batches. The same rotation is also applied to the key vectors, i.e., $k'^{(j)} = R^j k^{(j)}$, and the RoPE layer contains no learnable parameters.

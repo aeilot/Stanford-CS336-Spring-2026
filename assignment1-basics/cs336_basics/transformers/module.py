@@ -118,6 +118,42 @@ class SwiGLU(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
 
+
 class FFN(SwiGLU):
     pass
 
+
+class RotaryPositionalEmbedding(nn.Module):
+    cos_cached: torch.Tensor
+    sin_cached: torch.Tensor
+
+    def __init__(self, theta: float, d_k: int, max_seq_len: int, device: torch.device | None = None):
+        super().__init__()
+        self.theta = theta
+
+        # For every 2k-1 and 2k, we have the same frequency.
+        inv_freq = 1.0 / (theta ** (torch.arange(0, d_k, 2) / d_k))
+        # t starts from 0, so that the first position has no rotation applied.
+        t = torch.arange(max_seq_len, device=device).float()
+        # Outer Prod to get the table of angle theta for every i and k
+        freqs = torch.outer(t, inv_freq)
+        # Cache the cos and sin values for efficiency
+        self.register_buffer("cos_cached", freqs.cos(), persistent=False)
+        self.register_buffer("sin_cached", freqs.sin(), persistent=False)
+
+    def forward(self, x: torch.Tensor, token_positions: torch.Tensor) -> torch.Tensor:
+        # Get the cos and sin values for the token positions
+        # token_positions shape: (..., seq_len)
+        # cos/sin_cached shape: (..., seq_len, d_k/2)
+        cos = self.cos_cached[token_positions, :]
+        sin = self.sin_cached[token_positions, :]
+        # cos -sin
+        # sin cos
+        # Shape: (..., seq_len, d_k/2)
+        x1, x2 = x[..., ::2], x[..., 1::2]
+        # No need to compute the whole R matrix
+        # x1' = x1 * cos - x2 * sin
+        # x2' = x1 * sin + x2 * cos
+        x_rotated = torch.stack((x1 * cos - x2 * sin, x1 * sin + x2 * cos), dim=-1)
+        # flatten (starting from) -2 dim
+        return x_rotated.flatten(-2)
