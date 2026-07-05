@@ -1,3 +1,5 @@
+import math
+
 import jaxtyping
 import numpy as np
 import torch
@@ -89,3 +91,29 @@ class RMSNorm(nn.Module):
         result = x / rms * self.scale
 
         return result.to(in_dtype)
+
+
+class SiLU(nn.Module):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x * torch.sigmoid(x)
+
+
+class SwiGLU(nn.Module):
+    def __init__(
+        self, d_model: int, d_ff: int = 0, device: torch.device | None = None, dtype: torch.dtype | None = None
+    ):
+        super().__init__()
+        self.d_model = d_model
+        self.d_ff = 8 / 3 * d_model  # 8/3 is the recommended expansion factor for FFN in transformers
+        # Round to nearest 64 multiple
+        if d_ff < 64:
+            d_ff = int(8 * d_model / 3)
+            d_ff = 64 * math.ceil(d_ff / 64)
+        self.d_ff = d_ff
+        self.up_proj = Linear(self.d_model, self.d_ff, device=device, dtype=dtype)
+        self.down_proj = Linear(self.d_ff, self.d_model, device=device, dtype=dtype)
+        self.gate_proj = Linear(self.d_model, self.d_ff, device=device, dtype=dtype)
+        self.act_fn = SiLU()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))

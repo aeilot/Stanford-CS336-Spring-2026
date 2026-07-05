@@ -87,6 +87,14 @@ A language model takes as input a batched sequence of integer token IDs (i.e., t
 
 **Token Embeddings** Each embedding layer takes in a tensor of integers of shape (batch_size, sequence_length) and produces a sequence of vectors of shape (batch_size, sequence_length, d_model).
 
-The two key ops are `einsum`, which can do tensor contractions with arbitrary dimensions of input tensors, and `rearrange`, which can reorder, concatenate, and split arbitrary dimensions.
+**Einops** The two key ops are `einsum`, which can do tensor contractions with arbitrary dimensions of input tensors, and `rearrange`, which can reorder, concatenate, and split arbitrary dimensions.
 
-Many machine learning papers use row vectors in their notation, which result in representations that mesh well with the row-major memory ordering.
+**Row-Major** Many machine learning papers use row vectors in their notation, which result in representations that mesh well with the row-major memory ordering.
+
+**SwiGLU** Modern LLMs use SwiGLU, which combines the Swish activation function with the Gated Linear Unit (GLU) to improve model expressiveness and performance. The SiLU activation function is similar to the ReLU activation function, but is smooth at zero. (x times Sigmoid) Gated Linear Units are suggested to “reduce the vanishing gradient problem for deep architectures by providing a linear path for the gradients while retaining non-linear capabilities.”
+
+$$FFN(x)=W_2\left(\mathrm{SiLU}(W_1x)\odot(W_3x)\right)$$, where $W_1,W_3\in\mathbb{R}^{d_{ff}\times d_{model}}$, $W_2\in\mathbb{R}^{d_{model}\times d_{ff}}$, and $\odot$ denotes element-wise multiplication.
+
+Canonically, $d_{ff}=\frac{8}{3}d_{model}$; in practice, $d_{ff}$ is often rounded to a nearby multiple of 64 for hardware efficiency. This is basically `up projection` + `gate projection` then `down projection`.
+
+SwiGLU combines the SiLU (Swish) activation with GLU gating, and empirical results show it outperforms standard ReLU and plain SiLU in language modeling tasks.
