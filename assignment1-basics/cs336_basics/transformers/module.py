@@ -138,18 +138,21 @@ class RotaryPositionalEmbedding(nn.Module):
         # Outer Prod to get the table of angle theta for every i and k
         freqs = torch.outer(t, inv_freq)
         # Cache the cos and sin values for efficiency
+        # persistent = False means that these buffers will not be saved in the state_dict, which is useful for large models where you don't want to save these precomputed values.
         self.register_buffer("cos_cached", freqs.cos(), persistent=False)
         self.register_buffer("sin_cached", freqs.sin(), persistent=False)
 
     def forward(self, x: torch.Tensor, token_positions: torch.Tensor) -> torch.Tensor:
         # Get the cos and sin values for the token positions
         # token_positions shape: (..., seq_len)
-        # cos/sin_cached shape: (..., seq_len, d_k/2)
+        # cos/sin_cached shape: (seq_len, d_k/2)
+        # cos/sin shape: (..., seq_len, d_k/2)
+        # x shape: (..., seq_len, d_k)
         cos = self.cos_cached[token_positions, :]
         sin = self.sin_cached[token_positions, :]
         # cos -sin
         # sin cos
-        # Shape: (..., seq_len, d_k/2)
+        # x1, x2 shape: (..., seq_len, d_k/2)
         x1, x2 = x[..., ::2], x[..., 1::2]
         # No need to compute the whole R matrix
         # x1' = x1 * cos - x2 * sin
