@@ -80,6 +80,10 @@ class RMSNorm(nn.Module):
         in_dtype = x.dtype
         x = x.to(torch.float32)
 
+        # Keepdim: True to maintain the original shape for broadcasting
+        # ALWAYS REMEMBER
+        # The rule of broadcasting: First we align from the left, and match from the right.
+        # If the dims are not equal and one of them is 1, we can broadcast the smaller dim to match the larger dim.
         rms = torch.sqrt(torch.mean(x**2, dim=-1, keepdim=True) + self.eps)
 
         result = x / rms * self.scale
