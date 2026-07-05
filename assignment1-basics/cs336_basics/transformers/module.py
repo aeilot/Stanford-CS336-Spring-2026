@@ -55,3 +55,33 @@ class Embedding(nn.Module):
 
         # Perform embedding lookup
         return self.weights[token_ids]
+
+
+# Pre-Norm Transformer
+# Moving the LayerNorm to the input of the sublayer instead of the output.
+# This is known as Pre-Norm and can help with training stability in deep transformers.
+
+
+class RMSNorm(nn.Module):
+    def __init__(
+        self, d_model: int, eps: float = 1e-5, device: torch.device | None = None, dtype: torch.dtype | None = None
+    ):
+        super().__init__()
+        self.d_model = d_model
+        self.eps = eps
+        self.device = device
+        self.dtype = dtype
+
+        # Initialize Scale Parameter
+        self.scale = nn.Parameter(torch.ones(d_model, device=device, dtype=dtype))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Cast to Float32 to prevent overflow during computation
+        in_dtype = x.dtype
+        x = x.to(torch.float32)
+
+        rms = torch.sqrt(torch.mean(x**2, dim=-1, keepdim=True) + self.eps)
+
+        result = x / rms * self.scale
+
+        return result.to(in_dtype)
