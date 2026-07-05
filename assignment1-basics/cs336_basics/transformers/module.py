@@ -1,6 +1,5 @@
 import math
 
-import jaxtyping
 import numpy as np
 import torch
 from torch import nn
@@ -99,17 +98,23 @@ class SiLU(nn.Module):
 
 
 class SwiGLU(nn.Module):
+    d_ff: int
+
     def __init__(
-        self, d_model: int, d_ff: int = 0, device: torch.device | None = None, dtype: torch.dtype | None = None
+        self,
+        d_model: int,
+        d_ff: int | None = None,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
     ):
         super().__init__()
         self.d_model = d_model
-        self.d_ff = 8 / 3 * d_model  # 8/3 is the recommended expansion factor for FFN in transformers
-        # Round to nearest 64 multiple
-        if d_ff < 64:
-            d_ff = int(8 * d_model / 3)
-            d_ff = 64 * math.ceil(d_ff / 64)
-        self.d_ff = d_ff
+        if d_ff is None:
+            self.d_ff = 64 * math.ceil((8 * d_model / 3) / 64)
+            # 8/3 is the recommended expansion factor for FFN in transformers
+            # Round up to the next multiple of 64
+        else:
+            self.d_ff = d_ff
         self.up_proj = Linear(self.d_model, self.d_ff, device=device, dtype=dtype)
         self.down_proj = Linear(self.d_ff, self.d_model, device=device, dtype=dtype)
         self.gate_proj = Linear(self.d_model, self.d_ff, device=device, dtype=dtype)
@@ -132,7 +137,7 @@ class RotaryPositionalEmbedding(nn.Module):
         self.theta = theta
 
         # For every 2k-1 and 2k, we have the same frequency.
-        inv_freq = 1.0 / (theta ** (torch.arange(0, d_k, 2) / d_k))
+        inv_freq = 1.0 / (theta ** (torch.arange(0, d_k, 2, device=device) / d_k))
         # t starts from 0, so that the first position has no rotation applied.
         t = torch.arange(max_seq_len, device=device).float()
         # Outer Prod to get the table of angle theta for every i and k
@@ -150,6 +155,8 @@ class RotaryPositionalEmbedding(nn.Module):
         # x shape: (..., seq_len, d_k)
         cos = self.cos_cached[token_positions, :]
         sin = self.sin_cached[token_positions, :]
+        cos = cos.to(device=x.device, dtype=x.dtype)
+        sin = sin.to(device=x.device, dtype=x.dtype)
         # cos -sin
         # sin cos
         # x1, x2 shape: (..., seq_len, d_k/2)
