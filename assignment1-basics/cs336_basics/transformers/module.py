@@ -1,4 +1,5 @@
 import math
+import token
 
 import numpy as np
 import torch
@@ -195,4 +196,52 @@ class ScaledDotProductAttention(nn.Module):
         attn_weights = Softmax()(scores, dim=-1)
         # Compute the weighted sum of values
         output = torch.matmul(attn_weights, v)
+        return output
+
+
+class CausalMHA(nn.Module):
+    def __init__(
+        self, d_model: int, num_heads: int, dtype: torch.dtype | None = None, device: torch.device | None = None
+    ):
+        super().__init__()
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.d_k = d_model // num_heads
+
+        self.dtype = dtype
+        self.device = device
+
+        # Linear layers for query, key, and value
+        self.q_linear = Linear(d_model, d_model, device=device, dtype=dtype)
+        self.k_linear = Linear(d_model, d_model, device=device, dtype=dtype)
+        self.v_linear = Linear(d_model, d_model, device=device, dtype=dtype)
+        # Output linear layer
+        self.out_linear = Linear(d_model, d_model, device=device, dtype=dtype)
+
+    def forward(self, x: torch.Tensor, token_positions: torch.Tensor | None = None) -> torch.Tensor:
+        batch_size, seq_len, _ = x.shape
+
+        q = self.q_linear(x)
+        v = self.v_linear(x)
+        k = self.k_linear(x)
+
+        # Reshape q, k, v for multi-head attention
+        q = q.view(batch_size, seq_len, self.num_heads, self.d_k).transpose(1, 2)
+        k = k.view(batch_size, seq_len, self.num_heads, self.d_k).transpose(1, 2)
+        v = v.view(batch_size, seq_len, self.num_heads, self.d_k).transpose(1, 2)
+
+        rope = RotaryPositionalEmbedding(theta=10000, d_k=self.d_k, max_seq_len=seq_len, device=self.device)
+        mask = torch.tril(torch.ones((seq_len, seq_len), device=self.device))
+
+        # RoPE should be applied for each head separately
+        if token_positions is not None:
+            q = rope(q, token_positions)
+            k = rope(k, token_positions)
+
+        attn_output = ScaledDotProductAttention()(q, k, v, mask=mask)
+
+        attn_output = attn_output.transpose(1, 2).contiguous().view(batch_size, seq_len, self.d_model)
+
+        output = self.out_linear(attn_output)
+
         return output
