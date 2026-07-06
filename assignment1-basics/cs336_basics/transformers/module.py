@@ -199,6 +199,7 @@ class ScaledDotProductAttention(nn.Module):
         return output
 
 
+# MHA: head as batch
 class CausalMHA(nn.Module):
     def __init__(
         self, d_model: int, num_heads: int, dtype: torch.dtype | None = None, device: torch.device | None = None
@@ -230,7 +231,9 @@ class CausalMHA(nn.Module):
         k = k.view(batch_size, seq_len, self.num_heads, self.d_k).transpose(1, 2)
         v = v.view(batch_size, seq_len, self.num_heads, self.d_k).transpose(1, 2)
 
+        # Use a unified instance of rope for cache
         rope = RotaryPositionalEmbedding(theta=10000, d_k=self.d_k, max_seq_len=seq_len, device=self.device)
+        # Causal Mask with tril
         mask = torch.tril(torch.ones((seq_len, seq_len), device=self.device))
 
         # RoPE should be applied for each head separately
