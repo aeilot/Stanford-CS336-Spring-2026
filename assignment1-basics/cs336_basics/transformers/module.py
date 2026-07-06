@@ -178,3 +178,21 @@ class Softmax(nn.Module):
         x = x - x.max(dim=dim, keepdim=True).values
         exp_x = torch.exp(x)
         return exp_x / exp_x.sum(dim=dim, keepdim=True)
+
+
+class ScaledDotProductAttention(nn.Module):
+    def forward(
+        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, mask: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        # q, k, v shape: (batch_size, ..., seq_len, d_k)
+        d_k = q.size(-1)
+        # Compute the dot product between queries and keys
+        scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(d_k)
+        # Apply the mask if provided
+        if mask is not None:
+            scores = scores.masked_fill(mask == 0, float("-inf"))
+        # Apply softmax to get attention weights
+        attn_weights = Softmax()(scores, dim=-1)
+        # Compute the weighted sum of values
+        output = torch.matmul(attn_weights, v)
+        return output
