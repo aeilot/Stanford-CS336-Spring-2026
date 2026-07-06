@@ -167,3 +167,14 @@ class RotaryPositionalEmbedding(nn.Module):
         x_rotated = torch.stack((x1 * cos - x2 * sin, x1 * sin + x2 * cos), dim=-1)
         # flatten (starting from) -2 dim
         return x_rotated.flatten(-2)
+
+
+# Scaled Dot-Product Attention
+
+
+class Softmax(nn.Module):
+    def forward(self, x: torch.Tensor, dim: int) -> torch.Tensor:
+        # Subtract the max for numerical stability
+        x = x - x.max(dim=dim, keepdim=True).values
+        exp_x = torch.exp(x)
+        return exp_x / exp_x.sum(dim=dim, keepdim=True)
