@@ -19,6 +19,7 @@ from cs336_basics.transformers.module import (
     ScaledDotProductAttention,
     Softmax,
     SwiGLU,
+    TransformerBlock,
 )
 
 
@@ -209,7 +210,7 @@ def run_multihead_self_attention_with_rope(
     mha.k_linear.weights.data = k_proj_weight
     mha.v_linear.weights.data = v_proj_weight
     mha.out_linear.weights.data = o_proj_weight
-    return mha(in_features, token_positions)
+    return mha(in_features, token_positions, theta=theta, max_seq_len=max_seq_len)
 
 
 def run_rope(
@@ -306,7 +307,19 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+    block = TransformerBlock(d_model, num_heads, theta, d_ff, max_seq_len)
+
+    block.mha.q_linear.weights.data = weights["attn.q_proj.weight"]
+    block.mha.k_linear.weights.data = weights["attn.k_proj.weight"]
+    block.mha.v_linear.weights.data = weights["attn.v_proj.weight"]
+    block.mha.out_linear.weights.data = weights["attn.output_proj.weight"]
+    block.norm1.scale.data = weights["ln1.weight"]
+    block.ffn.gate_proj.weights.data = weights["ffn.w1.weight"]
+    block.ffn.down_proj.weights.data = weights["ffn.w2.weight"]
+    block.ffn.up_proj.weights.data = weights["ffn.w3.weight"]
+    block.norm2.scale.data = weights["ln2.weight"]
+
+    return block(in_features)
 
 
 def run_transformer_lm(

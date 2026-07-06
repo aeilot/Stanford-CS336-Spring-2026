@@ -202,7 +202,14 @@ class ScaledDotProductAttention(nn.Module):
 # MHA: head as batch
 class CausalMHA(nn.Module):
     def __init__(
-        self, d_model: int, num_heads: int, dtype: torch.dtype | None = None, device: torch.device | None = None
+        self,
+        d_model: int,
+        num_heads: int,
+        rope: RotaryPositionalEmbedding | None = None,
+        theta: float | None = None,
+        max_seq_len: int | None = None,
+        dtype: torch.dtype | None = None,
+        device: torch.device | None = None,
     ):
         super().__init__()
         self.d_model = d_model
@@ -212,6 +219,15 @@ class CausalMHA(nn.Module):
         self.dtype = dtype
         self.device = device
 
+        if rope is not None:
+            self.rope = rope
+        else:
+            self.rope = (
+                RotaryPositionalEmbedding(theta=theta, d_k=self.d_k, max_seq_len=max_seq_len, device=device)
+                if theta and max_seq_len
+                else None
+            )
+
         # Linear layers for query, key, and value
         self.q_linear = Linear(d_model, d_model, device=device, dtype=dtype)
         self.k_linear = Linear(d_model, d_model, device=device, dtype=dtype)
@@ -219,7 +235,11 @@ class CausalMHA(nn.Module):
         # Output linear layer
         self.out_linear = Linear(d_model, d_model, device=device, dtype=dtype)
 
-    def forward(self, x: torch.Tensor, token_positions: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        token_positions: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         batch_size, seq_len, _ = x.shape
 
         q = self.q_linear(x)
@@ -231,15 +251,13 @@ class CausalMHA(nn.Module):
         k = k.view(batch_size, seq_len, self.num_heads, self.d_k).transpose(1, 2)
         v = v.view(batch_size, seq_len, self.num_heads, self.d_k).transpose(1, 2)
 
-        # Use a unified instance of rope for cache
-        rope = RotaryPositionalEmbedding(theta=10000, d_k=self.d_k, max_seq_len=seq_len, device=self.device)
         # Causal Mask with tril
         mask = torch.tril(torch.ones((seq_len, seq_len), device=self.device))
 
         # RoPE should be applied for each head separately
-        if token_positions is not None:
-            q = rope(q, token_positions)
-            k = rope(k, token_positions)
+        if token_positions is not None and self.rope is not None:
+            q = self.rope(q, token_positions)
+            k = self.rope(k, token_positions)
 
         attn_output = ScaledDotProductAttention()(q, k, v, mask=mask)
 
@@ -248,3 +266,42 @@ class CausalMHA(nn.Module):
         output = self.out_linear(attn_output)
 
         return output
+
+
+# Transformer
+class TransformerBlock(nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        num_heads: int,
+        theta: float = 10000,
+        d_ff: int | None = None,
+        max_seq_len: int | None = None,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ):
+        super().__init__()
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.d_ff = d_ff if d_ff is not None else 64 * math.ceil((8 * d_model / 3) / 64)
+        self.device = device
+        self.theta = theta
+        self.max_seq_len = max_seq_len if max_seq_len is not None else 2048
+
+        rope = RotaryPositionalEmbedding(
+            theta=self.theta, d_k=self.d_model // self.num_heads, max_seq_len=self.max_seq_len, device=self.device
+        )
+
+        self.norm1 = RMSNorm(d_model, device=device, dtype=dtype)
+        self.mha = CausalMHA(d_model, num_heads, rope=rope, device=device, dtype=dtype)
+        self.norm2 = RMSNorm(d_model, device=device, dtype=dtype)
+        self.ffn = FFN(d_model, self.d_ff, device=device, dtype=dtype)
+
+    def forward(self, x: torch.Tensor, token_positions: torch.Tensor | None = None) -> torch.Tensor:
+        if token_positions is None:
+            token_positions = torch.arange(x.size(1), device=self.device)
+        # Pre-Norm
+        x = x + self.mha(self.norm1(x), token_positions=token_positions)
+        x = x + self.ffn(self.norm2(x))
+
+        return x
