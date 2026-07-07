@@ -122,3 +122,89 @@ R_1^i & 0 & \cdots & 0 \\
 $$
 
 where each $0$ denotes a $2 \times 2$ zero matrix. In practice, the full $d \times d$ matrix is never constructed; instead, the precomputed values of $\cos(\theta_{i,k})$ and $\sin(\theta_{i,k})$ are cached (e.g., using `self.register_buffer(persistent=False)`) and reused across layers and batches. The same rotation is also applied to the key vectors, i.e., $k'^{(j)} = R^j k^{(j)}$, and the RoPE layer contains no learnable parameters.
+
+## Resource Accounting
+
+For a model with vocab_size 50257, context length 1024, num_layers 48, d_model 1600, num_heads 25, and f_ff 4288:
+
+Embedding: 50257*1600 params = 80,411,200 params
+
+Each Transformer Block:
+
+Q, K, V, O: 4*1600*1600 params = 10,240,000 params
+2 Norm: 2*1600 params = 3,200 params
+FFN: 1600*4288*3 params = 20,582,400 params
+
+We have 48 * (10,240,000 + 3,200 + 1600*4288*3) params in total for the transformer blocks.
+
+The final linear layer: 1600*50257 params = 80,411,200 params
+The final norm layer: 1600 params
+
+In total we have
+
+50257*1600
++ 48 * (10,240,000 + 3,200 + 1600*4288*3)
++ 1600*50257
++ 1600
+= 1,640,452,800 params. (1.6B)
+
+If we store them with float32, that's 6.56GB.
+
+## FLOPs Accounting
+
+For a model with vocab_size 50257, context length 1024, num_layers 48, d_model 1600, num_heads 25, and f_ff 4288:
+
+Embedding lookup:
+0 FLOPs (memory access only)
+
+Each Transformer Block:
+
+Q, K, V, O projections:
+4 * (2 * 1024 * 1600 * 1600)
+= 20,971,520,000 FLOPs
+
+Attention score (QK^T):
+2 * 1024 * 1024 * 1600
+= 3,355,443,200 FLOPs
+
+Attention output (Attention × V):
+2 * 1024 * 1024 * 1600
+= 3,355,443,200 FLOPs
+
+FFN:
+3 * (2 * 1024 * 1600 * 4288)
+= 42,152,550,400 FLOPs
+
+Total per Transformer Block:
+20,971,520,000
++ 3,355,443,200
++ 3,355,443,200
++ 42,152,550,400
+= 69,834,956,800 FLOPs
+
+48 Transformer Blocks:
+48 * 69,834,956,800
+= 3,352,077,926,400 FLOPs
+
+Final linear layer:
+2 * 1024 * 1600 * 50257
+= 164,682,137,600 FLOPs
+
+Total forward FLOPs:
+3,352,077,926,400
++ 164,682,137,600
+= 3,516,760,064,000 FLOPs
+
+≈ 3.52 TFLOPs
+
+Training (forward + backward):
+≈ 3 × 3.52 TFLOPs
+≈ 10.55 TFLOPs
+
+Embedding lookup             :      0.00 GFLOPs (0.0%)
+Attention projections (QKVO) :   1006.63 GFLOPs (28.6%)
+Attention (QK^T + AV)        :    322.12 GFLOPs (9.2%)
+FFN                          :   2023.32 GFLOPs (57.5%)
+Final linear layer           :    164.68 GFLOPs (4.7%)
+
+The Feed-Forward Network (FFN) requires the most FLOPs, accounting for approximately 57.5% of the total forward computation.
