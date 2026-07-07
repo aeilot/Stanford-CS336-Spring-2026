@@ -1,4 +1,5 @@
 import math
+from collections.abc import Iterable
 from typing import Callable, Optional
 
 import torch
@@ -111,7 +112,7 @@ class AdamW(torch.optim.Optimizer):
 # a_min: minimum learning rate
 # T_w: the number of warm-up iterations
 # T_c: the final iteration of cosine annealing
-# 
+#
 def CosineLearningRateSchedule(t: int, a_max: float, a_min: float, T_w: int, T_c: int) -> float:
     if t < T_w:
         return t / T_w * a_max
@@ -120,6 +121,20 @@ def CosineLearningRateSchedule(t: int, a_max: float, a_min: float, T_w: int, T_c
     else:
         return a_min
 
+
+# To avoid exploding gradients
+# Enforce a limit on the norm of the gradient after each backward pass before taking an optimizer step
+# NOTE: We take the gradient for all parameters, and computer its L2 norm.
+def GradientClipping(params: Iterable[torch.nn.Parameter], max_norm: float):
+    eps = 1e-6
+    grads = [p.grad.data for p in params if p.grad is not None]
+    grads = torch.cat([g.view(-1) for g in grads])
+    total_norm = torch.norm(grads, p=2)
+    clip_coef = max_norm / (total_norm + eps)
+    if clip_coef < 1:
+        for p in params:
+            if p.grad is not None:
+                p.grad.data.mul_(clip_coef)
 
 if __name__ == "__main__":
     weights = torch.nn.Parameter(5 * torch.randn((10, 10)))

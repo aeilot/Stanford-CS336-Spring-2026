@@ -11,6 +11,7 @@ from torch import Tensor
 
 from cs336_basics.tokenizer import Tokenizer
 from cs336_basics.training.loss import CrossEntropyLoss
+from cs336_basics.training.optim import CosineLearningRateSchedule, GradientClipping
 from cs336_basics.transformers.model import TransformerLM
 from cs336_basics.transformers.module import (
     CausalMHA,
@@ -23,7 +24,7 @@ from cs336_basics.transformers.module import (
     SwiGLU,
     TransformerBlock,
 )
-from cs336_basics.training.optim import CosineLearningRateSchedule
+
 
 def run_linear(
     d_in: int,
@@ -538,7 +539,7 @@ def run_gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm:
 
     The gradients of the parameters (parameter.grad) should be modified in-place.
     """
-    raise NotImplementedError
+    return GradientClipping(parameters, max_l2_norm)
 
 
 def get_adamw_cls() -> Any:
