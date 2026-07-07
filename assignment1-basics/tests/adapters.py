@@ -11,6 +11,7 @@ from torch import Tensor
 from torch.nn.modules import transformer
 
 from cs336_basics.tokenizer import Tokenizer
+from cs336_basics.training.loss import CrossEntropyLoss
 from cs336_basics.transformers.model import TransformerLM
 from cs336_basics.transformers.module import (
     CausalMHA,
@@ -526,7 +527,8 @@ def run_cross_entropy(
     Returns:
         Float[Tensor, ""]: The average cross-entropy loss across examples.
     """
-    raise NotImplementedError
+    loss_fn = CrossEntropyLoss()
+    return loss_fn(inputs, targets)
 
 
 def run_gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm: float) -> None:
