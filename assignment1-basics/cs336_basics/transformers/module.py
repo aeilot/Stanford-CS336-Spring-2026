@@ -173,12 +173,11 @@ class RotaryPositionalEmbedding(nn.Module):
 # Scaled Dot-Product Attention
 
 
-class Softmax(nn.Module):
-    def forward(self, x: torch.Tensor, dim: int) -> torch.Tensor:
-        # Subtract the max for numerical stability
-        x = x - x.max(dim=dim, keepdim=True).values
-        exp_x = torch.exp(x)
-        return exp_x / exp_x.sum(dim=dim, keepdim=True)
+def Softmax(x: torch.Tensor, dim: int) -> torch.Tensor:
+    # Subtract the max for numerical stability
+    x = x - x.max(dim=dim, keepdim=True).values
+    exp_x = torch.exp(x)
+    return exp_x / exp_x.sum(dim=dim, keepdim=True)
 
 
 class ScaledDotProductAttention(nn.Module):
@@ -193,7 +192,7 @@ class ScaledDotProductAttention(nn.Module):
         if mask is not None:
             scores = scores.masked_fill(mask == 0, float("-inf"))
         # Apply softmax to get attention weights
-        attn_weights = Softmax()(scores, dim=-1)
+        attn_weights = Softmax(scores, dim=-1)
         # Compute the weighted sum of values
         output = torch.matmul(attn_weights, v)
         return output
