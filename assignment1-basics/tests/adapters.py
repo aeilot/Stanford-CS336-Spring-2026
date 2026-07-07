@@ -8,7 +8,6 @@ import numpy.typing as npt
 import torch
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
-from torch.nn.modules import transformer
 
 from cs336_basics.tokenizer import Tokenizer
 from cs336_basics.training.loss import CrossEntropyLoss
@@ -24,7 +23,7 @@ from cs336_basics.transformers.module import (
     SwiGLU,
     TransformerBlock,
 )
-
+from cs336_basics.training.optim import CosineLearningRateSchedule
 
 def run_linear(
     d_in: int,
@@ -574,7 +573,7 @@ def run_get_lr_cosine_schedule(
     Returns:
         Learning rate at the given iteration under the specified schedule.
     """
-    raise NotImplementedError
+    return CosineLearningRateSchedule(it, max_learning_rate, min_learning_rate, warmup_iters, cosine_cycle_iters)
 
 
 def run_save_checkpoint(
