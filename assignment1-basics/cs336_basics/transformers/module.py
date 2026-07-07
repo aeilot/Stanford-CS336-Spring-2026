@@ -275,6 +275,7 @@ class TransformerBlock(nn.Module):
         d_model: int,
         num_heads: int,
         theta: float = 10000,
+        rope: RotaryPositionalEmbedding | None = None,
         d_ff: int | None = None,
         max_seq_len: int | None = None,
         device: torch.device | None = None,
@@ -288,9 +289,10 @@ class TransformerBlock(nn.Module):
         self.theta = theta
         self.max_seq_len = max_seq_len if max_seq_len is not None else 2048
 
-        rope = RotaryPositionalEmbedding(
-            theta=self.theta, d_k=self.d_model // self.num_heads, max_seq_len=self.max_seq_len, device=self.device
-        )
+        if rope is None:
+            rope = RotaryPositionalEmbedding(
+                theta=self.theta, d_k=self.d_model // self.num_heads, max_seq_len=self.max_seq_len, device=self.device
+            )
 
         self.norm1 = RMSNorm(d_model, device=device, dtype=dtype)
         self.mha = CausalMHA(d_model, num_heads, rope=rope, device=device, dtype=dtype)

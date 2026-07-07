@@ -8,8 +8,10 @@ import numpy.typing as npt
 import torch
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
+from torch.nn.modules import transformer
 
 from cs336_basics.tokenizer import Tokenizer
+from cs336_basics.transformers.model import TransformerLM
 from cs336_basics.transformers.module import (
     CausalMHA,
     Embedding,
@@ -401,7 +403,34 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    transformer_lm = TransformerLM(
+        vocab_size=vocab_size,
+        context_length=context_length,
+        num_layers=num_layers,
+        d_model=d_model,
+        num_heads=num_heads,
+        rope_theta=rope_theta,
+        d_ff=d_ff,
+    )
+
+    transformer_lm.embedding.weights.data = weights["token_embeddings.weight"]
+    transformer_lm.norm.scale.data = weights["ln_final.weight"]
+    transformer_lm.output_layer.weights.data = weights["lm_head.weight"]
+
+    for i in range(num_layers):
+        transformer_lm.transformer_blocks[i].mha.q_linear.weights.data = weights[f"layers.{i}.attn.q_proj.weight"]
+        transformer_lm.transformer_blocks[i].mha.k_linear.weights.data = weights[f"layers.{i}.attn.k_proj.weight"]
+        transformer_lm.transformer_blocks[i].mha.v_linear.weights.data = weights[f"layers.{i}.attn.v_proj.weight"]
+        transformer_lm.transformer_blocks[i].mha.out_linear.weights.data = weights[
+            f"layers.{i}.attn.output_proj.weight"
+        ]
+        transformer_lm.transformer_blocks[i].norm1.scale.data = weights[f"layers.{i}.ln1.weight"]
+        transformer_lm.transformer_blocks[i].ffn.gate_proj.weights.data = weights[f"layers.{i}.ffn.w1.weight"]
+        transformer_lm.transformer_blocks[i].ffn.down_proj.weights.data = weights[f"layers.{i}.ffn.w2.weight"]
+        transformer_lm.transformer_blocks[i].ffn.up_proj.weights.data = weights[f"layers.{i}.ffn.w3.weight"]
+        transformer_lm.transformer_blocks[i].norm2.scale.data = weights[f"layers.{i}.ln2.weight"]
+
+    return transformer_lm(in_indices)
 
 
 def run_rmsnorm(
