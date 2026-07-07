@@ -208,3 +208,88 @@ FFN                          :   2023.32 GFLOPs (57.5%)
 Final linear layer           :    164.68 GFLOPs (4.7%)
 
 The Feed-Forward Network (FFN) requires the most FLOPs, accounting for approximately 57.5% of the total forward computation.
+
+## AdamW Resource
+
+Let
+
+V = vocab_size
+L = num_layers
+d = d_model
+h = num_heads
+d_ff = (8/3)d
+
+### Parameters
+
+Embedding:
+
+Vd params
+
+Each Transformer Block:
+
+Q, K, V, O:
+
+4d² params
+
+2 RMSNorm:
+
+2d params
+
+SwiGLU FFN:
+
+3dd_ff params
+
+Each Transformer block therefore contains
+
+4d² + 3dd_ff + 2d params
+
+For all Transformer blocks:
+
+L(4d² + 3dd_ff + 2d) params
+
+Final RMSNorm:
+
+d params
+
+Output embedding (LM head):
+
+Vd params
+
+Total parameters:
+
+P
+= Vd
++ L(4d² + 3dd_ff + 2d)
++ Vd
++ d
+
+= 2Vd + L(4d² + 3dd_ff + 2d) + d
+
+### Parameter Memory
+
+Using float32 (4 bytes per parameter):
+
+M_params = 4P
+
+### Gradient Memory
+
+Gradients have exactly the same size as the parameters:
+
+M_grad = 4P
+
+### AdamW Optimizer State
+
+AdamW stores two additional tensors for every parameter:
+- first moment (m)
+- second moment (v)
+
+Therefore,
+
+M_state = 8P
+
+### Total Memory (excluding activations)
+
+M_total
+= M_params + M_grad + M_state
+
+= 16P bytes
