@@ -101,6 +101,17 @@ class AdamW(torch.optim.Optimizer):
         return loss
 
 
+# LLaMA Cosine Learning Rate Schedule
+# First linearly increase the learning rate from 0 to a_max over T_w warmup steps,
+# then decay it to a_min over T_c - T_w steps using a cosine schedule,
+# and finally keep it at a_min for the remaining steps.
+#
+# t: current step
+# a_max: maximum learning rate
+# a_min: minimum learning rate
+# T_w: the number of warm-up iterations
+# T_c: the final iteration of cosine annealing
+# 
 def CosineLearningRateSchedule(t: int, a_max: float, a_min: float, T_w: int, T_c: int) -> float:
     if t < T_w:
         return t / T_w * a_max
