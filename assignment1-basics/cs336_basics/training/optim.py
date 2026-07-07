@@ -127,14 +127,19 @@ def CosineLearningRateSchedule(t: int, a_max: float, a_min: float, T_w: int, T_c
 # NOTE: We take the gradient for all parameters, and computer its L2 norm.
 def GradientClipping(params: Iterable[torch.nn.Parameter], max_norm: float):
     eps = 1e-6
-    grads = [p.grad.data for p in params if p.grad is not None]
-    grads = torch.cat([g.view(-1) for g in grads])
-    total_norm = torch.norm(grads, p=2)
-    clip_coef = max_norm / (total_norm + eps)
-    if clip_coef < 1:
+    grad_sum = 0.0
+    for p in params:
+        if p.grad is None:
+            continue
+        grad_sum += (p.grad.data**2).sum().item()
+    grad_norm = math.sqrt(grad_sum)
+    clip_coef = max_norm / (grad_norm + eps)
+    if grad_norm > max_norm:
         for p in params:
-            if p.grad is not None:
-                p.grad.data.mul_(clip_coef)
+            if p.grad is None:
+                continue
+            p.grad.data.mul_(clip_coef)
+
 
 if __name__ == "__main__":
     weights = torch.nn.Parameter(5 * torch.randn((10, 10)))
