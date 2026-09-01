@@ -12,6 +12,7 @@ from torch import Tensor
 from cs336_basics.tokenizer import Tokenizer
 from cs336_basics.training.loss import CrossEntropyLoss
 from cs336_basics.training.optim import CosineLearningRateSchedule, GradientClipping
+from cs336_basics.training.train import load_data
 from cs336_basics.transformers.model import TransformerLM
 from cs336_basics.transformers.module import (
     CausalMHA,
@@ -493,7 +494,7 @@ def run_get_batch(
         is the sampled input sequences, and the second tuple item is the corresponding
         language modeling labels.
     """
-    raise NotImplementedError
+    return load_data(dataset, batch_size, context_length, torch.device(device))
 
 
 def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, " ..."]:
